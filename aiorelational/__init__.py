@@ -1,32 +1,15 @@
-from types import AsyncGeneratorType
 from typing import (
     AsyncGenerator,
     Awaitable,
     Callable,
     List,
-    NewType,
     Optional,
     Tuple,
     TypeVar,
 )
 
-# import typeguard
-
-# typeguard.importhook.install_import_hook()
-
-
 T = TypeVar("T")
 U = TypeVar("U")
-
-
-# SortedAsyncGenerator = NewType("SortedAsyncGenerator", AsyncGeneratorType)
-
-# from collections.abc import AsyncGenerator as AsyncGenerator2
-
-
-# class SortedAsyncGenerator(AsyncGenerator[T, None]):
-#     def __init__(self, x: AsyncGenerator[T, None]) -> None:
-#         super().__init__()
 
 
 async def get_next(it: AsyncGenerator[T, None], resevoir=[]) -> Optional[T]:
@@ -295,17 +278,6 @@ async def full_outer_union(
     await right.aclose()
 
 
-# async def group_by_hash(
-#     collect, it: AsyncGenerator[T, None]
-# ) -> AsyncGenerator[T, None]:
-#     groups = {}
-#     async for row in it:
-#         new_row = collect(row)
-#         groups[new_row] = new_row
-#     for row in groups.keys():
-#         yield row
-
-
 async def limited(limit: int, it: AsyncGenerator[T, None]) -> AsyncGenerator[T, None]:
     i = 0
     async for r in it:
@@ -313,19 +285,6 @@ async def limited(limit: int, it: AsyncGenerator[T, None]) -> AsyncGenerator[T, 
             break
         yield r
         i += 1
-
-
-# async def group_by(it):
-#     column_id_to_select = [
-#         self.sources[0].columns.get_column_idx_from_identifier(column_identifier)
-#         for column_identifier in self.columns_to_order_by
-#         ]
-#     current_row = None
-#     for row in it:
-#         new_row = tuple(row[i] for i in column_id_to_select)
-#         if current_row != new_row:
-#             yield new_row
-#             current_row = new_row
 
 
 inner_merge_join = inner_merge_join_m2m

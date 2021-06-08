@@ -1,3 +1,4 @@
+import asyncio
 from typing import (
     AsyncGenerator,
     Awaitable,
@@ -65,8 +66,7 @@ async def inner_merge_join_o2o(
     """
     One to one join.
     """
-    a = await get_next(left)
-    b = await get_next(right)
+    a, b = await asyncio.gather(get_next(left), get_next(right))
 
     while a is not None and b is not None:
         ret: int = await cmp(a, b)
@@ -76,8 +76,7 @@ async def inner_merge_join_o2o(
             b = await get_next(right)
         elif ret == 0:
             yield a, b
-            a = await get_next(left)
-            b = await get_next(right)
+            a, b = await asyncio.gather(get_next(left), get_next(right))
         else:
             raise Exception
 
@@ -93,8 +92,7 @@ async def inner_merge_join_o2m(
     """
     One to many join.
     """
-    a = await get_next(left)
-    b = await get_next(right)
+    a, b = await asyncio.gather(get_next(left), get_next(right))
 
     right_reservoir: List[T] = []
 
@@ -116,8 +114,7 @@ async def inner_merge_join_o2m(
                     right_reservoir.append(b)
                     break
 
-            a = await get_next(left)
-            b = await get_next(right, right_reservoir)
+            a, b = await asyncio.gather(get_next(left), get_next(right, right_reservoir))
         else:
             raise Exception
 
@@ -138,8 +135,7 @@ async def inner_merge_join_m2m(
 
     See: http://www.dcs.ed.ac.uk/home/tz/phd/thesis/node20.htm
     """
-    a = await get_next(left)
-    b = await get_next(right)
+    a, b = await asyncio.gather(get_next(left), get_next(right))
 
     left_reservoir: List[T] = []
     right_reservoir: List[T] = []
@@ -214,8 +210,7 @@ async def outer_merge_join_o2o(
     """
     One to one.
     """
-    a = await get_next(left)
-    b = await get_next(right)
+    a, b = await asyncio.gather(get_next(left), get_next(right))
 
     while a and b:
         ret: int = await cmp(a, b)
@@ -225,8 +220,7 @@ async def outer_merge_join_o2o(
             b = await get_next(right)
         elif ret == 0:
             yield a, b
-            a = await get_next(left)
-            b = await get_next(right)
+            a, b = await asyncio.gather(get_next(left), get_next(right))
         else:
             raise Exception
 
@@ -244,8 +238,7 @@ async def full_outer_union(
     Assumes input is ordered
     """
 
-    a = await get_next(left)
-    b = await get_next(right)
+    a, b = await asyncio.gather(get_next(left), get_next(right))
 
     while b is not None and a is not None:
         ret = await cmp(a, b)
@@ -261,8 +254,7 @@ async def full_outer_union(
             assert a is not None and b is not None
             yield a
             yield b
-            a = await get_next(left)
-            b = await get_next(right)
+            a, b = await asyncio.gather(get_next(left), get_next(right))
         else:
             raise Exception(ret)
 

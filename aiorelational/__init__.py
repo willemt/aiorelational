@@ -1,5 +1,6 @@
 import asyncio
 from typing import (
+    Any,
     AsyncGenerator,
     Awaitable,
     Callable,
@@ -7,6 +8,7 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
+    Union,
 )
 
 T = TypeVar("T")
@@ -277,6 +279,22 @@ async def limited(limit: int, it: AsyncGenerator[T, None]) -> AsyncGenerator[T, 
             break
         yield r
         i += 1
+
+
+async def filter(
+    func: Union[Callable[[Any], bool], None], it: AsyncGenerator[T, None]
+) -> AsyncGenerator[T, None]:
+    """
+    Equivalent of python's filter()
+    """
+    if func:
+        async for r in it:
+            if func(r):
+                yield r
+    else:
+        async for r in it:
+            if r:
+                yield r
 
 
 inner_merge_join = inner_merge_join_m2m

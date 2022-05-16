@@ -19,6 +19,11 @@ async def numbers(a, b, c):
         yield i
 
 
+async def items(*a):
+    for i in a:
+        yield i
+
+
 async def cmp_func(a, b):
     if a < b:
         return -1

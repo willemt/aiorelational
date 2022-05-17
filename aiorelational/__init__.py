@@ -4,6 +4,7 @@ from typing import (
     AsyncGenerator,
     Awaitable,
     Callable,
+    Iterable,
     List,
     Optional,
     Tuple,
@@ -285,7 +286,7 @@ async def filter(
     func: Union[Callable[[Any], bool], None], it: AsyncGenerator[T, None]
 ) -> AsyncGenerator[T, None]:
     """
-    Equivalent of python's filter()
+    Equivalent of Python's filter()
     """
     if func:
         async for r in it:
@@ -295,6 +296,29 @@ async def filter(
         async for r in it:
             if r:
                 yield r
+
+
+async def groupby(
+    it: AsyncGenerator[T, None], key: Callable[[Any], Any]
+) -> AsyncGenerator[Tuple[Any, Iterable[T]], None]:
+    """
+    Equivalent of Python's itertools.groupby()
+    """
+
+    r = await it.__anext__()
+    current_bucket = [r]
+    current_key = key(r)
+
+    try:
+        async for r in it:
+            item_key = key(r)
+            if current_key != item_key:
+                yield current_key, current_bucket
+                current_bucket = []
+                current_key = item_key
+            current_bucket.append(r)
+    finally:
+        yield current_key, current_bucket
 
 
 inner_merge_join = inner_merge_join_m2m

@@ -273,13 +273,16 @@ async def full_outer_union(
     await right.aclose()
 
 
-async def limited(limit: int, it: AsyncGenerator[T, None]) -> AsyncGenerator[T, None]:
+async def take(limit: int, it: AsyncGenerator[T, None]) -> AsyncGenerator[T, None]:
     i = 0
     async for r in it:
         if i >= limit:
             break
         yield r
         i += 1
+
+
+limited = take
 
 
 async def filter(

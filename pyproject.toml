@@ -1,8 +1,16 @@
 [tool.poetry]
 name = "aiorelational"
-version = "0.5.0"
-description = ""
+version = "0.6.0"
+description = "Relational operators for working with Async iterators"
+readme = "README.rst"
+keywords = ["asyncio"]
+license = "MIT"
 authors = ["Willem Thiart <himself@willemthiart.com>"]
+homepage = "https://github.com/willemt/aiorelational"
+repository = "https://github.com/willemt/aiorelational"
+classifiers = [
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
 
 [tool.poetry.dependencies]
 python = "^3.7"

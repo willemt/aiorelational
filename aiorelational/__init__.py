@@ -16,11 +16,11 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 
-async def get_next(it: AsyncGenerator[T, None], resevoir=[]) -> Optional[T]:
+async def get_next(it: AsyncGenerator[T, None], resevoir=[], hint=None) -> Optional[T]:
     if resevoir:
         return resevoir.pop(0)
     try:
-        x = await it.__anext__()
+        x = await it.asend(hint)
         return x
     except StopAsyncIteration:
         return None
@@ -104,7 +104,7 @@ async def inner_merge_join_o2m(
         if ret == -1:
             a = await get_next(left)
         elif ret == 1:
-            b = await get_next(right, right_reservoir)
+            b = await get_next(right, resevoir=right_reservoir)
         elif ret == 0:
             yield a, b
 
@@ -112,12 +112,14 @@ async def inner_merge_join_o2m(
             while b:
                 if await cmp(a, b) == 0:
                     yield a, b
-                    b = await get_next(right, right_reservoir)
+                    b = await get_next(right, resevoir=right_reservoir)
                 else:
                     right_reservoir.append(b)
                     break
 
-            a, b = await asyncio.gather(get_next(left), get_next(right, right_reservoir))
+            a, b = await asyncio.gather(
+                get_next(left), get_next(right, resevoir=right_reservoir)
+            )
         else:
             raise Exception
 
@@ -145,19 +147,19 @@ async def inner_merge_join_m2m(
 
     while a is not None and b is not None:
         if a is None:
-            a = await get_next(left, left_reservoir)
+            a = await get_next(left, resevoir=left_reservoir)
             continue
 
         if b is None:
-            b = await get_next(right, right_reservoir)
+            b = await get_next(right, resevoir=right_reservoir)
             continue
 
         ret = await cmp(a, b)
 
         if ret == -1:
-            a = await get_next(left, left_reservoir)
+            a = await get_next(left, resevoir=left_reservoir)
         elif ret == 1:
-            b = await get_next(right, right_reservoir)
+            b = await get_next(right, resevoir=right_reservoir)
         elif ret == 0:
             yield a, b
 
@@ -165,23 +167,23 @@ async def inner_merge_join_m2m(
 
             # match all the rights
             bs = [b]
-            b = await get_next(right, right_reservoir)
+            b = await get_next(right, resevoir=right_reservoir)
             while b is not None:
                 if await cmp(a, b) == 0:
                     yield a, b
                     bs.append(b)
-                    b = await get_next(right, right_reservoir)
+                    b = await get_next(right, resevoir=right_reservoir)
                 else:
                     break
 
             # match all the lefts
-            a = await get_next(left, left_reservoir)
+            a = await get_next(left, resevoir=left_reservoir)
             while a is not None:
                 if not await cmp(a, first_b) == 0:
                     break
                 for b_ in bs:
                     yield a, b_
-                a = await get_next(left, left_reservoir)
+                a = await get_next(left, resevoir=left_reservoir)
 
         else:
             raise Exception
@@ -273,6 +275,47 @@ async def full_outer_union(
     await right.aclose()
 
 
+async def full_outer_union_distinct(
+    cmp: ComparisonFunc[T],
+    left: AsyncGenerator[T, None],
+    right: AsyncGenerator[T, None],
+) -> AsyncGenerator[T, None]:
+    """
+    Yield items from left and right in order
+    Yield items found in both only once
+    Assumes input is ordered
+    """
+    a, b = await asyncio.gather(get_next(left), get_next(right))
+
+    while b is not None and a is not None:
+        ret = await cmp(a, b)
+        if ret == -1:
+            assert a is not None
+            yield a
+            a = await get_next(left)
+        elif ret == 1:
+            assert b is not None
+            yield b
+            b = await get_next(right)
+        elif ret == 0:
+            assert a is not None and b is not None
+            yield a
+            a, b = await asyncio.gather(get_next(left), get_next(right))
+        else:
+            raise Exception(ret)
+
+    while b is not None:
+        yield b
+        b = await get_next(right)
+
+    while a is not None:
+        yield a
+        a = await get_next(left)
+
+    await left.aclose()
+    await right.aclose()
+
+
 async def take(limit: int, it: AsyncGenerator[T, None]) -> AsyncGenerator[T, None]:
     i = 0
     async for r in it:
@@ -328,7 +371,16 @@ inner_merge_join = inner_merge_join_m2m
 
 
 async def list(source: AsyncGenerator[T, None]) -> List[T]:
+    """Convert async generator into a list
+    :param source: The async generator to convert."""
     items = []
     async for item in source:
         items.append(item)
     return items
+
+
+async def count(source: AsyncGenerator[T, None]) -> int:
+    count = 0
+    async for item in source:
+        count += 1
+    return count

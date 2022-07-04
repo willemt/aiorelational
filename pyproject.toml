@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "aiorelational"
-version = "0.6.0"
+version = "0.7.0"
 description = "Relational operators for working with Async iterators"
 readme = "README.rst"
 keywords = ["asyncio"]

@@ -384,3 +384,10 @@ async def count(source: AsyncGenerator[T, None]) -> int:
     async for item in source:
         count += 1
     return count
+
+
+async def enumerate(source: AsyncGenerator[T, None]) -> AsyncGenerator[Tuple[int, T], None]:
+    count = 0
+    async for item in source:
+        yield count, item
+        count += 1

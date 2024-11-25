@@ -1,53 +1,99 @@
 import asyncio
-from typing import (
-    Any,
-    AsyncGenerator,
-    Awaitable,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from dataclasses import dataclass
+from typing import Any
+from typing import AsyncGenerator
+from typing import AsyncIterator
+from typing import Awaitable
+from typing import Callable
+from typing import Generic
+from typing import Iterable
+from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import TypeVar
+from typing import Union
 
-T = TypeVar("T")
+X = TypeVar("X")
+Y = TypeVar("Y")
 U = TypeVar("U")
 
 
-async def get_next(it: AsyncGenerator[T, None], resevoir=[], hint=None) -> Optional[T]:
-    if resevoir:
-        return resevoir.pop(0)
+@dataclass
+class Hint(Generic[U]):
+    other: U
+
+
+async def get_next(
+    gen: AsyncGenerator[X, U],
+) -> Optional[X]:
     try:
-        x = await it.asend(hint)
-        return x
+        return await gen.__anext__()
     except StopAsyncIteration:
         return None
 
 
-ComparisonFunc = Callable[[T, T], Awaitable[int]]
+async def get_next_with_resevoir(
+    gen: AsyncGenerator[X, U],
+    resevoir: List[X],
+) -> Optional[X]:
+    if resevoir:
+        return resevoir.pop(0)
+    try:
+        return await gen.__anext__()
+    except StopAsyncIteration:
+        return None
 
-HashFunc = Callable[[T], Awaitable[U]]
+
+async def get_next_hinted(
+    gen: AsyncGenerator[X, Hint[U]],
+    hint: U,
+) -> Optional[X]:
+    try:
+        return await gen.asend(Hint[U](hint))
+    except StopAsyncIteration:
+        return None
 
 
-async def merge_join(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[T, None]:
-    """
-    Merge 2 streams (with the same columns) into one
-    The join uses the document ID
-    Input must be sorted for the join to work.
-    Output is sorted
-    """
-    pass
+async def get_next_batch(gen: AsyncGenerator[List[X], U]) -> Optional[List[X]]:
+    try:
+        return await gen.__anext__()
+    except StopAsyncIteration:
+        return None
+
+
+async def get_next_batch_hinted(
+    gen: AsyncGenerator[List[X], Hint[U]], hint: U
+) -> Optional[List[X]]:
+    try:
+        return await gen.asend(Hint[U](hint))
+    except StopAsyncIteration:
+        return None
+
+
+ComparisonFunc = Callable[[X, Y], Awaitable[int]]
+
+HashFunc = Callable[[X], Awaitable[U]]
+
+
+# async def merge_join(
+#     cmp: ComparisonFunc[X, Y],
+#     left: AsyncGenerator[X, None],
+#     right: AsyncGenerator[Y, None],
+# ) -> AsyncGenerator[X, None]:
+#     """
+#     Merge 2 streams (with the same columns) into one
+#     The join uses the document ID
+#     Input must be sorted for the join to work.
+#     Output is sorted
+#     """
+#     pass
 
 
 async def inner_hash_join_o2o(
-    hash: HashFunc[T, U], left: AsyncGenerator[T, None], right: AsyncGenerator[T, None]
-) -> AsyncGenerator[T, None]:
+    hash: HashFunc[Union[X, Y], U],
+    left: AsyncGenerator[X, None],
+    right: AsyncGenerator[Y, None],
+) -> AsyncGenerator[X, None]:
     """
     Join 2 streams (with different columns) into one.
     One to one join.
@@ -62,10 +108,10 @@ async def inner_hash_join_o2o(
 
 
 async def inner_merge_join_o2o(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[Tuple[T, T], None]:
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, Hint[Y]],
+    right: AsyncGenerator[Y, Hint[X]],
+) -> AsyncGenerator[Tuple[X, Y], None]:
     """
     One to one join.
     """
@@ -74,9 +120,9 @@ async def inner_merge_join_o2o(
     while a is not None and b is not None:
         ret: int = await cmp(a, b)
         if ret == -1:
-            a = await get_next(left)
+            a = await get_next_hinted(left, hint=b)
         elif ret == 1:
-            b = await get_next(right)
+            b = await get_next_hinted(right, hint=a)
         elif ret == 0:
             yield a, b
             a, b = await asyncio.gather(get_next(left), get_next(right))
@@ -87,38 +133,87 @@ async def inner_merge_join_o2o(
     await right.aclose()
 
 
+async def inner_merge_join_o2o_batched(
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[List[X], Hint[Y]],
+    right: AsyncGenerator[List[Y], Hint[X]],
+) -> AsyncGenerator[List[Tuple[X, Y]], U]:
+    """
+    One to one join optimized for sorted batches without duplicates.
+    """
+    a_batch = await get_next_batch(left)
+    b_batch = await get_next_batch(right)
+    a_index, b_index = 0, 0
+
+    while a_batch is not None and b_batch is not None:
+        result_batch = []
+        while a_index < len(a_batch) and b_index < len(b_batch):
+            a = a_batch[a_index]
+            b = b_batch[b_index]
+            ret = await cmp(a, b)
+            if ret == 0:
+                result_batch.append((a, b))
+                a_index += 1
+                b_index += 1
+            elif ret < 0:
+                a_index += 1
+            else:
+                b_index += 1
+
+        if result_batch:
+            yield result_batch
+
+        if a_index >= len(a_batch):
+            if b_index < len(b_batch):
+                a_batch = await get_next_batch_hinted(left, hint=b_batch[b_index:])  # type: ignore
+            else:
+                a_batch = await get_next_batch(left)
+            a_index = 0
+
+        if b_index >= len(b_batch):
+            if a_batch and a_index < len(a_batch):
+                b_batch = await get_next_batch_hinted(right, hint=a_batch[a_index:])  # type: ignore
+            else:
+                b_batch = await get_next_batch(right)
+            b_index = 0
+
+    await left.aclose()
+    await right.aclose()
+
+
 async def inner_merge_join_o2m(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[Tuple[T, T], None]:
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, Hint[U]],
+    right: AsyncGenerator[Y, Hint[U]],
+) -> AsyncGenerator[Tuple[X, Y], Hint[U]]:
     """
     One to many join.
     """
     a, b = await asyncio.gather(get_next(left), get_next(right))
 
-    right_reservoir: List[T] = []
+    right_reservoir: List[Optional[Y]] = []
 
     while a is not None and b is not None:
         ret = await cmp(a, b)
         if ret == -1:
             a = await get_next(left)
         elif ret == 1:
-            b = await get_next(right, resevoir=right_reservoir)
+            b = await get_next_with_resevoir(right, right_reservoir)
         elif ret == 0:
             yield a, b
 
-            b = await get_next(right, right_reservoir)
+            b = await get_next_with_resevoir(right, right_reservoir)
             while b:
                 if await cmp(a, b) == 0:
                     yield a, b
-                    b = await get_next(right, resevoir=right_reservoir)
+                    b = await get_next_with_resevoir(right, right_reservoir)
                 else:
+                    assert b is not None
                     right_reservoir.append(b)
                     break
 
             a, b = await asyncio.gather(
-                get_next(left), get_next(right, resevoir=right_reservoir)
+                get_next(left), get_next_with_resevoir(right, right_reservoir)
             )
         else:
             raise Exception
@@ -128,10 +223,10 @@ async def inner_merge_join_o2m(
 
 
 async def inner_merge_join_m2m(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[Tuple[T, T], None]:
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, None],
+    right: AsyncGenerator[Y, None],
+) -> AsyncGenerator[Tuple[X, Y], None]:
     """
     Join 2 streams (with different columns) into one.
     Many to many.
@@ -142,8 +237,8 @@ async def inner_merge_join_m2m(
     """
     a, b = await asyncio.gather(get_next(left), get_next(right))
 
-    left_reservoir: List[T] = []
-    right_reservoir: List[T] = []
+    left_reservoir: List[Optional[X]] = []
+    right_reservoir: List[Optional[Y]] = []
 
     while a is not None and b is not None:
         if a is None:
@@ -157,9 +252,9 @@ async def inner_merge_join_m2m(
         ret = await cmp(a, b)
 
         if ret == -1:
-            a = await get_next(left, resevoir=left_reservoir)
+            a = await get_next_with_resevoir(left, resevoir=left_reservoir)
         elif ret == 1:
-            b = await get_next(right, resevoir=right_reservoir)
+            b = await get_next_with_resevoir(right, resevoir=right_reservoir)
         elif ret == 0:
             yield a, b
 
@@ -167,23 +262,23 @@ async def inner_merge_join_m2m(
 
             # match all the rights
             bs = [b]
-            b = await get_next(right, resevoir=right_reservoir)
+            b = await get_next_with_resevoir(right, resevoir=right_reservoir)
             while b is not None:
                 if await cmp(a, b) == 0:
                     yield a, b
                     bs.append(b)
-                    b = await get_next(right, resevoir=right_reservoir)
+                    b = await get_next_with_resevoir(right, resevoir=right_reservoir)
                 else:
                     break
 
             # match all the lefts
-            a = await get_next(left, resevoir=left_reservoir)
+            a = await get_next_with_resevoir(left, resevoir=left_reservoir)
             while a is not None:
                 if not await cmp(a, first_b) == 0:
                     break
                 for b_ in bs:
                     yield a, b_
-                a = await get_next(left, resevoir=left_reservoir)
+                a = await get_next_with_resevoir(left, resevoir=left_reservoir)
 
         else:
             raise Exception
@@ -193,10 +288,10 @@ async def inner_merge_join_m2m(
 
 
 async def inner_merge_join_m2m_naive(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[Tuple[T, T], None]:
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, None],
+    right: AsyncGenerator[Y, None],
+) -> AsyncGenerator[Tuple[X, Y], None]:
     """
     Expensive but correct
     """
@@ -208,10 +303,10 @@ async def inner_merge_join_m2m_naive(
 
 
 async def outer_merge_join_o2o(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[Tuple[T, Optional[T]], None]:
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, None],
+    right: AsyncGenerator[Y, None],
+) -> AsyncGenerator[Tuple[X, Optional[Y]], None]:
     """
     One to one.
     """
@@ -234,10 +329,10 @@ async def outer_merge_join_o2o(
 
 
 async def full_outer_union(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[T, None]:
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, None],
+    right: AsyncGenerator[Y, None],
+) -> AsyncGenerator[Union[X, Y], None]:
     """
     Yield items from left and right in order
     Assumes input is ordered
@@ -276,10 +371,10 @@ async def full_outer_union(
 
 
 async def full_outer_union_distinct(
-    cmp: ComparisonFunc[T],
-    left: AsyncGenerator[T, None],
-    right: AsyncGenerator[T, None],
-) -> AsyncGenerator[T, None]:
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, None],
+    right: AsyncGenerator[Y, None],
+) -> AsyncGenerator[Union[X, Y], None]:
     """
     Yield items from left and right in order
     Yield items found in both only once
@@ -316,7 +411,7 @@ async def full_outer_union_distinct(
     await right.aclose()
 
 
-async def take(limit: int, it: AsyncGenerator[T, None]) -> AsyncGenerator[T, None]:
+async def take(limit: int, it: AsyncGenerator[X, None]) -> AsyncGenerator[X, None]:
     i = 0
     async for r in it:
         if i >= limit:
@@ -329,8 +424,8 @@ limited = take
 
 
 async def filter(
-    func: Union[Callable[[Any], bool], None], it: AsyncGenerator[T, None]
-) -> AsyncGenerator[T, None]:
+    func: Union[Callable[[Any], bool], None], it: AsyncGenerator[X, None]
+) -> AsyncGenerator[X, None]:
     """
     Equivalent of Python's filter()
     """
@@ -345,8 +440,8 @@ async def filter(
 
 
 async def groupby(
-    it: AsyncGenerator[T, None], key: Callable[[Any], Any]
-) -> AsyncGenerator[Tuple[Any, Iterable[T]], None]:
+    it: AsyncGenerator[X, None], key: Callable[[Any], Any]
+) -> AsyncGenerator[Tuple[Any, Iterable[X]], None]:
     """
     Equivalent of Python's itertools.groupby()
     """
@@ -370,7 +465,7 @@ async def groupby(
 inner_merge_join = inner_merge_join_m2m
 
 
-async def list(source: AsyncGenerator[T, None]) -> List[T]:
+async def list(source: Union[AsyncGenerator[X, None], AsyncIterator[X]]) -> List[X]:
     """Convert async generator into a list
     :param source: The async generator to convert."""
     items = []
@@ -379,15 +474,23 @@ async def list(source: AsyncGenerator[T, None]) -> List[T]:
     return items
 
 
-async def count(source: AsyncGenerator[T, None]) -> int:
+async def count(source: AsyncGenerator[X, None]) -> int:
     count = 0
     async for item in source:
         count += 1
     return count
 
 
-async def enumerate(source: AsyncGenerator[T, None]) -> AsyncGenerator[Tuple[int, T], None]:
+async def enumerate(
+    source: AsyncGenerator[X, None]
+) -> AsyncGenerator[Tuple[int, X], None]:
     count = 0
     async for item in source:
         yield count, item
         count += 1
+
+
+async def from_batches(source: AsyncGenerator[List[X], U]) -> AsyncGenerator[X, U]:
+    async for batch in source:
+        for item in batch:
+            yield item

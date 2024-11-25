@@ -1,10 +1,10 @@
 import random
+from typing import Any
+from typing import AsyncGenerator
+from typing import List
 
-from hypothesis.strategies import integers, lists
-
-import pytest
-
-from aiorelational import limited, list as gen2list
+from hypothesis.strategies import integers
+from hypothesis.strategies import lists
 
 
 async def random_unique_numbers(a, b, c):
@@ -19,9 +19,46 @@ async def numbers(a, b, c):
         yield i
 
 
+async def lists_of_numbers(a, b, c) -> AsyncGenerator[List[int],None]:
+    batch = []
+    for i in range(a, b, c):
+        batch.append(i)
+        if len(batch) == random.randint(1, 5):
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
+async def lists_of_numbers_hint_aware(a, b, c) -> AsyncGenerator[List[int],None]:
+    hint = None
+    batch = []
+    for i in range(a, b, c):
+        if hint is not None:
+            if i < hint.other[0]:
+                continue
+        batch.append(i)
+        if len(batch) == random.randint(1, 8):
+            hint = yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
 async def items(*a):
     for i in a:
         yield i
+
+
+async def lists_of_items(*a) -> AsyncGenerator[List[Any],None]:
+    batch = []
+    for i in a:
+        batch.append(i)
+        if len(batch) == random.randint(1, 5):
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 async def cmp_func(a, b):

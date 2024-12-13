@@ -20,7 +20,7 @@ U = TypeVar("U")
 
 @dataclass
 class Hint(Generic[U]):
-    other: U
+    other: List[U]
 
 
 async def get_next(
@@ -49,7 +49,7 @@ async def get_next_hinted(
     hint: U,
 ) -> Optional[X]:
     try:
-        return await gen.asend(Hint[U](hint))
+        return await gen.asend(Hint[U]([hint]))
     except StopAsyncIteration:
         return None
 
@@ -62,7 +62,7 @@ async def get_next_batch(gen: AsyncGenerator[List[X], U]) -> Optional[List[X]]:
 
 
 async def get_next_batch_hinted(
-    gen: AsyncGenerator[List[X], Hint[U]], hint: U
+    gen: AsyncGenerator[List[X], Hint[U]], hint: List[U]
 ) -> Optional[List[X]]:
     try:
         return await gen.asend(Hint[U](hint))

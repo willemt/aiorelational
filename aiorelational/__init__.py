@@ -12,6 +12,7 @@ from typing import Optional
 from typing import Tuple
 from typing import TypeVar
 from typing import Union
+from typing import cast
 
 X = TypeVar("X")
 Y = TypeVar("Y")
@@ -133,6 +134,32 @@ async def inner_merge_join_o2o(
     await right.aclose()
 
 
+async def left_inner_merge_join_o2o(
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[X, Hint[Y]],
+    right: AsyncGenerator[Y, Hint[X]],
+) -> AsyncGenerator[X, None]:
+    """
+    One to one join.
+    """
+    a, b = await asyncio.gather(get_next(left), get_next(right))
+
+    while a is not None and b is not None:
+        ret: int = await cmp(a, b)
+        if ret == -1:
+            a = await get_next_hinted(left, hint=b)
+        elif ret == 1:
+            b = await get_next_hinted(right, hint=a)
+        elif ret == 0:
+            yield a
+            a, b = await asyncio.gather(get_next(left), get_next(right))
+        else:
+            raise Exception
+
+    await left.aclose()
+    await right.aclose()
+
+
 async def inner_merge_join_o2o_batched(
     cmp: ComparisonFunc[X, Y],
     left: AsyncGenerator[List[X], Hint[Y]],
@@ -141,8 +168,10 @@ async def inner_merge_join_o2o_batched(
     """
     One to one join optimized for sorted batches without duplicates.
     """
-    a_batch = await get_next_batch(left)
-    b_batch = await get_next_batch(right)
+    a_batch, b_batch = await asyncio.gather(
+        get_next_batch(left),
+        get_next_batch(right),
+    )
     a_index, b_index = 0, 0
 
     while a_batch is not None and b_batch is not None:
@@ -411,6 +440,70 @@ async def full_outer_union_distinct(
     await right.aclose()
 
 
+async def full_outer_union_distinct_batched(
+    cmp: ComparisonFunc[X, Y],
+    left: AsyncGenerator[List[X], Hint[Y]],
+    right: AsyncGenerator[List[Y], Hint[X]],
+) -> AsyncGenerator[List[Union[X, Y]], U]:
+    """
+    Yield items from left and right in order
+    Yield items found in both only once
+    Assumes input is ordered
+    """
+    a_batch = await get_next_batch(left)
+    b_batch = await get_next_batch(right)
+    a_index, b_index = 0, 0
+
+    while a_batch is not None and b_batch is not None:
+        result_batch: List[Union[X, Y]] = []
+        while a_index < len(a_batch) and b_index < len(b_batch):
+            a = a_batch[a_index]
+            b = b_batch[b_index]
+            ret = await cmp(a, b)
+            if ret == -1:
+                result_batch.append(a)
+                a_index += 1
+            elif ret == 1:
+                result_batch.append(b)
+                b_index += 1
+            elif ret == 0:
+                result_batch.append(a)
+                a_index += 1
+                b_index += 1
+            else:
+                raise Exception(ret)
+
+        if result_batch:
+            yield result_batch
+
+        if a_index >= len(a_batch):
+            if b_index < len(b_batch):
+                a_batch = await get_next_batch_hinted(left, hint=b_batch[b_index:])  # type: ignore
+            else:
+                a_batch = await get_next_batch(left)
+            a_index = 0
+
+        if b_index >= len(b_batch):
+            if a_batch and a_index < len(a_batch):
+                b_batch = await get_next_batch_hinted(right, hint=a_batch[a_index:])  # type: ignore
+            else:
+                b_batch = await get_next_batch(right)
+            b_index = 0
+
+    while b_batch is not None:
+        yield cast(List[Union[X, Y]], b_batch[b_index:])
+        b_batch = await get_next_batch(right)
+        b_index = 0
+
+    while a_batch is not None:
+        yield cast(List[Union[X, Y]], a_batch[a_index:])
+        a_batch = await get_next_batch(left)
+        a_index = 0
+
+    await left.aclose()
+    await right.aclose()
+
+
 async def take(limit: int, it: AsyncGenerator[X, None]) -> AsyncGenerator[X, None]:
     i = 0
     async for r in it:
@@ -494,3 +587,16 @@ async def from_batches(source: AsyncGenerator[List[X], U]) -> AsyncGenerator[X, 
     async for batch in source:
         for item in batch:
             yield item
+
+
+async def to_batches(source: AsyncGenerator[X, U], batch_size: Optional[int] = None) -> AsyncGenerator[List[X], U]:
+    batch_size = batch_size or 25
+    chunk = []
+    async for item in source:
+        chunk.append(item)
+        if len(chunk) >= batch_size:
+            yield chunk
+            chunk = []
+
+    if chunk:
+        yield chunk

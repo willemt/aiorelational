@@ -3,6 +3,8 @@ from typing import Any
 from typing import AsyncGenerator
 from typing import List
 
+from hypothesis.strategies import booleans
+from hypothesis.strategies import composite
 from hypothesis.strategies import integers
 from hypothesis.strategies import lists
 
@@ -70,6 +72,35 @@ async def cmp_func(a, b):
 
 
 unique_monotonic = lists(integers(min_value=0, max_value=20)).map(set).map(sorted)
+
+
+@composite
+def unique_monotonic_sublists(draw):
+    base = draw(unique_monotonic)
+    if not base:
+        return []
+
+    boundary_bools = draw(
+        lists(
+            booleans(), 
+            min_size=len(base) - 1, 
+            max_size=len(base) - 1
+        )
+    )
+
+    sublists = []
+    current = [base[0]]
+
+    for x, should_split in zip(base[1:], boundary_bools):
+        if should_split:
+            sublists.append(current)
+            current = [x]
+        else:
+            current.append(x)
+
+    sublists.append(current)
+
+    return sublists
 
 
 async def list2asyncgen(x):

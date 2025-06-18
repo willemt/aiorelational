@@ -8,10 +8,12 @@ from hypothesis.strategies import composite
 from hypothesis.strategies import integers
 from hypothesis.strategies import lists
 
+r = random.Random()
+
 
 async def random_unique_numbers(a, b, c):
     numbers = list(range(a, b, c))
-    random.shuffle(numbers)
+    r.shuffle(numbers)
     for i in numbers:
         yield i
 
@@ -25,7 +27,7 @@ async def lists_of_numbers(a, b, c) -> AsyncGenerator[List[int], None]:
     batch = []
     for i in range(a, b, c):
         batch.append(i)
-        if len(batch) == random.randint(1, 5):
+        if len(batch) == r.randint(1, 5):
             yield batch
             batch = []
     if batch:
@@ -40,7 +42,7 @@ async def lists_of_numbers_hint_aware(a, b, c) -> AsyncGenerator[List[int], None
             if i < hint.other[0]:
                 continue
         batch.append(i)
-        if len(batch) == random.randint(1, 8):
+        if len(batch) == r.randint(1, 8):
             hint = yield batch
             batch = []
     if batch:
@@ -56,7 +58,7 @@ async def lists_of_items(*a) -> AsyncGenerator[List[Any], None]:
     batch = []
     for i in a:
         batch.append(i)
-        if len(batch) == random.randint(1, 5):
+        if len(batch) == r.randint(1, 5):
             yield batch
             batch = []
     if batch:

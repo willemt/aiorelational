@@ -67,4 +67,13 @@ async def test_sorted_hint_aware(merge_func):
     it = merge_func(cmp_func, x, y)
     results = await gen2list(it)
     results = list(chain(*results))
-    assert results == [(4, 4), (10, 10), (16, 16), (22, 22), (28, 28), (34, 34), (40, 40), (46, 46)]
+    assert results == [
+        (4, 4),
+        (10, 10),
+        (16, 16),
+        (22, 22),
+        (28, 28),
+        (34, 34),
+        (40, 40),
+        (46, 46),
+    ]

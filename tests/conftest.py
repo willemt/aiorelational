@@ -21,7 +21,7 @@ async def numbers(a, b, c):
         yield i
 
 
-async def lists_of_numbers(a, b, c) -> AsyncGenerator[List[int],None]:
+async def lists_of_numbers(a, b, c) -> AsyncGenerator[List[int], None]:
     batch = []
     for i in range(a, b, c):
         batch.append(i)
@@ -32,7 +32,7 @@ async def lists_of_numbers(a, b, c) -> AsyncGenerator[List[int],None]:
         yield batch
 
 
-async def lists_of_numbers_hint_aware(a, b, c) -> AsyncGenerator[List[int],None]:
+async def lists_of_numbers_hint_aware(a, b, c) -> AsyncGenerator[List[int], None]:
     hint = None
     batch = []
     for i in range(a, b, c):
@@ -52,7 +52,7 @@ async def items(*a):
         yield i
 
 
-async def lists_of_items(*a) -> AsyncGenerator[List[Any],None]:
+async def lists_of_items(*a) -> AsyncGenerator[List[Any], None]:
     batch = []
     for i in a:
         batch.append(i)
@@ -81,11 +81,7 @@ def unique_monotonic_sublists(draw):
         return []
 
     boundary_bools = draw(
-        lists(
-            booleans(), 
-            min_size=len(base) - 1, 
-            max_size=len(base) - 1
-        )
+        lists(booleans(), min_size=len(base) - 1, max_size=len(base) - 1)
     )
 
     sublists = []

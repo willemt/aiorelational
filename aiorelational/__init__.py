@@ -589,7 +589,9 @@ async def from_batches(source: AsyncGenerator[List[X], U]) -> AsyncGenerator[X, 
             yield item
 
 
-async def to_batches(source: AsyncGenerator[X, U], batch_size: Optional[int] = None) -> AsyncGenerator[List[X], U]:
+async def to_batches(
+    source: AsyncGenerator[X, U], batch_size: Optional[int] = None
+) -> AsyncGenerator[List[X], U]:
     batch_size = batch_size or 25
     chunk = []
     async for item in source:
